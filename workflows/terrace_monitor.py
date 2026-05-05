@@ -1,3 +1,4 @@
+import base64
 from datetime import timedelta
 
 from temporalio import workflow
@@ -77,7 +78,7 @@ class TerraceMonitorWorkflow(PydanticAIWorkflow):
                     "Use your tools to take action if needed. "
                     "If nothing requires attention, just describe what you see."
                 ),
-                BinaryContent(data=photo.data, media_type=photo.media_type),
+                BinaryContent(data=base64.b64decode(photo.data_b64), media_type=photo.media_type),
             ]
         )
 

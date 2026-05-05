@@ -11,11 +11,11 @@ def test_monitor_config_defaults():
 def test_captured_photo():
     photo = CapturedPhoto(
         path="/photos/bird.jpg",
-        data=b"fake image bytes",
+        data_b64="ZmFrZSBpbWFnZSBieXRlcw==",
         media_type="image/jpeg",
     )
     assert photo.path == "/photos/bird.jpg"
-    assert photo.data == b"fake image bytes"
+    assert photo.data_b64 == "ZmFrZSBpbWFnZSBieXRlcw=="
     assert photo.media_type == "image/jpeg"
 
 

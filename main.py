@@ -1,7 +1,6 @@
 import argparse
 import asyncio
 import json
-import sys
 
 from temporalio.client import Client
 from temporalio.worker import Worker

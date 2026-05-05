@@ -35,15 +35,24 @@ The entire pipeline runs as a durable Temporal workflow with pause/resume contro
 
 The Pydantic AI agent's LLM calls and tool invocations are automatically wrapped as Temporal activities, making them durable and retryable.
 
+## Quick start
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+./run.sh
+```
+
+That's it. The script installs uv and the Temporal CLI if missing, starts the Temporal dev server, launches the worker, runs the demo (5 photos, 15s apart), and tails the event log. Press Ctrl+C to stop everything.
+
 ## Prerequisites
 
-- Python 3.13+
-- [uv](https://docs.astral.sh/uv/) (package manager)
-- [Temporal CLI](https://docs.temporal.io/cli) (for the dev server)
 - macOS (for `afplay` sound and `osascript` notifications)
+- [Homebrew](https://brew.sh/) (used to install Temporal CLI if not present)
 - An [Anthropic API key](https://console.anthropic.com/)
 
-## Setup
+## Manual setup
+
+If you prefer to run things yourself:
 
 ```bash
 # Install dependencies
@@ -56,7 +65,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 temporal server start-dev
 ```
 
-## Running
+## Running manually
 
 ### 1. Start the worker
 

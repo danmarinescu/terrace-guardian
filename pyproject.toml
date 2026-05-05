@@ -1,0 +1,10 @@
+[project]
+name = "test-project"
+version = "0.1.0"
+description = "Terrace automation system — monitors outdoor terrace with AI"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "temporalio>=1.18.2",
+    "pydantic-ai[anthropic]",
+]

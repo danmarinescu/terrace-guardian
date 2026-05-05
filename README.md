@@ -2,7 +2,7 @@
 
 An AI-powered outdoor terrace monitoring system built with [Temporal](https://temporal.io) and [Pydantic AI](https://pydantic.dev/docs/ai/).
 
-A camera captures photos of the terrace at regular intervals. Each photo is analyzed by Claude (Sonnet 4.6) via Pydantic AI's vision capabilities. Based on what it sees, the system autonomously takes action:
+A camera captures photos of the terrace at regular intervals. Each photo is sent to Claude (Sonnet 4.6) through a Pydantic AI agent. Based on what it sees, the system autonomously takes action:
 
 - **Bird detected** &rarr; plays a scare sound via macOS `afplay`
 - **Plants look dry** &rarr; sends a macOS notification to water them

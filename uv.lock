@@ -3940,7 +3940,7 @@ wheels = [
 ]
 
 [[package]]
-name = "test-project"
+name = "terrace-guardian"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

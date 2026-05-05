@@ -11,7 +11,6 @@ from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
 
 from activities.camera import capture_photo
 from activities.logger import log_event
-from agent.terrace_agent import temporal_agent
 from models.types import MonitorConfig
 from workflows.terrace_monitor import TerraceMonitorWorkflow
 

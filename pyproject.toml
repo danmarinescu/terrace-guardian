@@ -1,5 +1,5 @@
 [project]
-name = "test-project"
+name = "terrace-guardian"
 version = "0.1.0"
 description = "Terrace automation system — monitors outdoor terrace with AI"
 readme = "README.md"

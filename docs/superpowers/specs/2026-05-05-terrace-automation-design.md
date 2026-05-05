@@ -2,56 +2,52 @@
 
 ## Overview
 
-An outdoor terrace monitoring and automation system built on Temporal workflows. A camera sensor captures photos at configurable intervals, Claude Sonnet 4.6 analyzes the scene via vision API, and the system dispatches actuators based on detected conditions (birds, dry plants, rain exposure, etc.).
+An outdoor terrace monitoring and automation system built on Temporal workflows with Pydantic AI. A camera sensor captures photos at configurable intervals, a Pydantic AI agent (Claude Sonnet 4.6) analyzes the scene and autonomously calls actuator tools (play sound, send notification) — all durably executed via Temporal.
 
 ## Architecture
 
 Single long-lived `TerraceMonitorWorkflow` running an infinite loop:
 
 ```
-capture_photo → analyze_scene → decide actions → dispatch actuators → log → sleep(interval)
+capture_photo (activity) → temporal_agent.run(photo) → log_event (activity) → sleep(interval)
 ```
 
-The workflow holds all monitoring state and responds to signals (pause/resume/set_interval) and queries (get_terrace_status). After a configurable number of cycles (default 100), it calls `continue-as-new` to keep history bounded, carrying over current state.
+The Pydantic AI agent handles analysis, decision-making, and actuation in a single step. The agent sees the photo, reasons about it, and calls actuator tools as needed. These tool calls are automatically wrapped as Temporal activities by the `TemporalAgent` integration, making them durable and retryable.
+
+The workflow holds monitoring state and responds to signals (pause/resume/set_interval) and queries (get_terrace_status). After a configurable number of cycles (default 100), it calls `continue-as-new` to keep history bounded, carrying over current state.
 
 Workflow ID is fixed (`terrace-monitor`) to ensure only one instance runs at a time.
 
-## Data Models
+## Pydantic AI Integration
 
-### SceneAnalysis
-
-Returned by the LLM analysis activity.
+### TemporalAgent Setup
 
 ```python
-class ConditionType(str, Enum):
-    BIRD = "bird"
-    DRY_PLANTS = "dry_plants"
-    RAIN_EXPOSURE = "rain_exposure"
-    OTHER = "other"
+from pydantic_ai import Agent
+from pydantic_ai.durable_exec.temporal import TemporalAgent, PydanticAIPlugin
 
-class ActionType(str, Enum):
-    PLAY_SOUND = "play_sound"
-    NOTIFY = "notify"
-    WATER_PLANTS = "water_plants"
-    NONE = "none"
+agent = Agent(
+    "anthropic:claude-sonnet-4-6",
+    instructions="You are a terrace monitoring assistant. You analyze photos of an outdoor terrace and take appropriate actions using the tools available to you.",
+    name="terrace_monitor",
+)
 
-@dataclass
-class DetectedCondition:
-    type: ConditionType
-    confidence: float  # 0-1
-    description: str
+# Register actuator tools on the agent (see Tools section)
 
-@dataclass
-class RecommendedAction:
-    action_type: ActionType
-    reason: str
-
-@dataclass
-class SceneAnalysis:
-    summary: str
-    conditions: list[DetectedCondition]
-    recommended_actions: list[RecommendedAction]
+temporal_agent = TemporalAgent(agent)
 ```
+
+### How It Works
+
+1. `temporal_agent.run(prompt)` is called from within the workflow
+2. Pydantic AI sends the photo to Claude Sonnet 4.6 for analysis
+3. The LLM reasons about what it sees and decides which tools to call
+4. Each tool call (play_sound, notify_owner) is automatically executed as a Temporal activity
+5. The agent returns a final text summary of what it found and did
+
+This collapses the previous analyze → decide → actuate pipeline into a single agent invocation.
+
+## Data Models
 
 ### TerraceStatus
 
@@ -61,54 +57,16 @@ Returned by the `get_terrace_status` query.
 @dataclass
 class TerraceStatus:
     last_photo_path: str | None
-    last_analysis: SceneAnalysis | None
+    last_analysis: str | None  # agent's text summary
     last_checked_at: str | None  # ISO timestamp
     is_paused: bool
     interval_seconds: int
     cycle_count: int
 ```
 
-## Activities
+### MonitorConfig
 
-### capture_photo(photos_dir: str) -> str
-
-Reads the next image file from the `photos/` directory, cycling alphabetically (round-robin). Returns the file path. Tracks position via a simple counter that wraps around.
-
-- Retry: 1 attempt (no retry needed — local filesystem)
-- Timeout: 10s
-
-### analyze_scene(photo_path: str) -> SceneAnalysis
-
-Reads the image file, sends it to Claude Sonnet 4.6 vision API with a system prompt instructing structured JSON output. Parses the response into a `SceneAnalysis` dataclass.
-
-- Retry: up to 2 retries
-- Start-to-close timeout: 30s
-- The system prompt defines the JSON schema and instructs the LLM to assess: birds/animals, plant health/dryness, weather conditions, items at risk from rain, and any other notable conditions.
-
-### play_sound(sound_type: str) -> None
-
-Plays an audio file using macOS `afplay` command. Maps `sound_type` to a file in the `sounds/` directory (e.g., `bird_scare`). Falls back to system beep (`afplay /System/Library/Sounds/Funk.aiff`) if the file is not found.
-
-- Retry: none
-- Timeout: 10s
-
-### notify_owner(title: str, message: str) -> None
-
-Sends a macOS system notification via `osascript -e 'display notification "message" with title "title"'`. Used for conditions requiring human attention (rain exposure, plant health alerts).
-
-- Retry: none
-- Timeout: 5s
-
-### log_event(event: dict) -> None
-
-Writes a structured JSON log entry to console (stdout) and appends to `logs/events.jsonl`. Logs every cycle including "no action needed" so there's a full history.
-
-- Retry: none
-- Timeout: 5s
-
-## Workflow: TerraceMonitorWorkflow
-
-### Input Parameters
+Workflow input.
 
 ```python
 @dataclass
@@ -118,49 +76,81 @@ class MonitorConfig:
     continue_as_new_threshold: int = 100
 ```
 
+## Agent Tools (Actuators)
+
+Registered on the Pydantic AI agent. Each tool call becomes a Temporal activity automatically.
+
+### play_sound(sound_type: str) -> str
+
+Plays an audio file using macOS `afplay` command. The agent calls this when it detects birds or animals that should be scared away.
+
+- `sound_type`: e.g., `"bird_scare"` — maps to a file in `sounds/` directory
+- Falls back to system sound (`/System/Library/Sounds/Funk.aiff`) if file not found
+- Returns a confirmation message
+
+### notify_owner(title: str, message: str) -> str
+
+Sends a macOS system notification via `osascript`. The agent calls this for conditions requiring human attention: rain with exposed items, plants needing water, or other alerts.
+
+- `title`: notification title (e.g., "Rain Alert")
+- `message`: notification body (e.g., "Cushions are getting wet on the terrace")
+- Returns a confirmation message
+
+## Regular Activities (Non-Agent)
+
+These are standard Temporal activities, not agent tools, because they run outside the agent's scope.
+
+### capture_photo(photos_dir: str) -> str
+
+Reads the next image file from the `photos/` directory, cycling alphabetically (round-robin). Returns the file path. Tracks position via a simple counter that wraps around.
+
+- Retry: 1 attempt
+- Timeout: 10s
+
+### log_event(summary: str, photo_path: str, actions_taken: list[str]) -> None
+
+Writes a structured JSON log entry to console (stdout) and appends to `logs/events.jsonl`. Logs every cycle including "no action needed" so there's a full history.
+
+- Retry: none
+- Timeout: 5s
+
+## Workflow: TerraceMonitorWorkflow
+
 ### Signals
 
-- **`pause`** — Sets `is_paused = True`. Loop continues but skips capture/analyze/actuate.
+- **`pause`** — Sets `is_paused = True`. Loop continues but skips the agent run.
 - **`resume`** — Sets `is_paused = False`. Next iteration resumes normal operation.
 - **`set_interval(seconds: int)`** — Changes sleep duration. Validated: min 10s, max 600s.
 
 ### Queries
 
-- **`get_terrace_status() -> TerraceStatus`** — Returns full current state: last photo path, last analysis, last check timestamp, paused flag, interval, cycle count.
+- **`get_terrace_status() -> TerraceStatus`** — Returns full current state: last photo path, last analysis summary, last check timestamp, paused flag, interval, cycle count.
 
 ### Loop Logic
 
 ```
 1. Check if paused → if yes, sleep(interval), continue
 2. capture_photo(photos_dir) → photo_path
-3. analyze_scene(photo_path) → analysis
-4. Update workflow state (last_photo_path, last_analysis, last_checked_at)
-5. For each recommended_action in analysis:
-   - PLAY_SOUND → execute play_sound activity
-   - NOTIFY → execute notify_owner activity
-   - WATER_PLANTS → execute notify_owner activity (simulated)
-   - NONE → skip
-6. log_event (always, regardless of actions taken)
-7. Increment cycle_count
-8. If cycle_count >= threshold → continue-as-new with current state
-9. sleep(interval)
+3. temporal_agent.run(prompt_with_photo) → result
+4. Update workflow state (last_photo_path, last_analysis = result.output, last_checked_at)
+5. log_event(result.output, photo_path, actions_taken)
+6. Increment cycle_count
+7. If cycle_count >= threshold → continue-as-new with current state
+8. sleep(interval)
 ```
+
+### Agent Prompt
+
+The agent receives a prompt each cycle containing:
+- The photo (as base64 image content)
+- Instructions to analyze the terrace scene
+- Context: "Look for birds/animals, check plant health, assess weather conditions and rain risk to exposed items. Use your tools to take action if needed. If nothing requires attention, just describe what you see."
 
 ### Error Handling
 
-- If `analyze_scene` fails after retries: cycle is skipped and logged. No actuators fire. Workflow continues.
-- If an actuator activity fails: logged but doesn't block other actuators or the next cycle.
+- If the agent run fails after retries: cycle is skipped and logged. Workflow continues.
+- Individual tool failures within the agent are handled by Temporal's activity retry mechanism.
 - The workflow never fails permanently — individual cycle failures are isolated.
-
-## Decision Logic
-
-The workflow maps LLM-recommended actions to activity calls. The LLM suggests, the workflow decides. This keeps the workflow deterministic and testable.
-
-Action mapping:
-- `PLAY_SOUND` → `play_sound("bird_scare")` — for bird/animal detection
-- `NOTIFY` → `notify_owner(title, reason)` — for rain exposure, general alerts
-- `WATER_PLANTS` → `notify_owner("Plants Need Water", reason)` — simulated, sends notification
-- `NONE` → no activity dispatched
 
 ## Project Structure
 
@@ -170,17 +160,18 @@ test_project/
 ├── main.py                 # CLI: worker, start, pause, resume, status, interval
 ├── workflows/
 │   ├── __init__.py
-│   └── terrace_monitor.py
+│   └── terrace_monitor.py  # TerraceMonitorWorkflow
 ├── activities/
 │   ├── __init__.py
-│   ├── camera.py
-│   ├── analyzer.py
-│   ├── sound.py
-│   ├── notifier.py
-│   └── logger.py
+│   ├── camera.py           # capture_photo
+│   └── logger.py           # log_event
+├── agent/
+│   ├── __init__.py
+│   ├── terrace_agent.py    # Agent definition + TemporalAgent wrapping
+│   └── tools.py            # play_sound, notify_owner tool definitions
 ├── models/
 │   ├── __init__.py
-│   └── types.py
+│   └── types.py            # TerraceStatus, MonitorConfig
 ├── photos/                 # test images (user-provided)
 ├── sounds/                 # audio files for actuators
 │   └── bird_scare.wav
@@ -190,7 +181,7 @@ test_project/
 ## Dependencies
 
 - `temporalio>=1.18.2` (already present)
-- `anthropic` (Claude vision API)
+- `pydantic-ai[anthropic]` (Pydantic AI with Anthropic model support)
 
 No other dependencies. `afplay` and `osascript` are built into macOS.
 
@@ -219,5 +210,5 @@ Uses `argparse` for CLI parsing.
 2. Start Temporal dev server
 3. Start worker in one terminal
 4. Start workflow in another terminal
-5. Watch: system cycles through images, plays sound when it detects a bird, pops up notification for rain/plants, logs "all clear" for the clean terrace
-6. Demo signals: pause, resume, change interval, query status
+5. Watch: system cycles through images, agent analyzes each scene — plays a sound when it detects a bird, pops up a macOS notification for rain/plants, logs "all clear" for the clean terrace
+6. Demo signals: pause, resume, change interval, query status to see latest analysis

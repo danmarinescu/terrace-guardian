@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 from temporalio.client import Client
 from temporalio.worker import Worker
@@ -24,6 +25,7 @@ async def run_worker():
         task_queue=TASK_QUEUE,
         workflows=[TerraceMonitorWorkflow],
         activities=[capture_photo, log_event],
+        activity_executor=ThreadPoolExecutor(max_workers=4),
     )
     print(f"Worker started on task queue '{TASK_QUEUE}'")
     await worker.run()

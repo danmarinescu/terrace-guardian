@@ -8,3 +8,8 @@ dependencies = [
     "temporalio>=1.18.2",
     "pydantic-ai[anthropic]",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+]

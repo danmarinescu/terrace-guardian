@@ -1,4 +1,3 @@
-import base64
 import os
 import tempfile
 from pathlib import Path
@@ -13,7 +12,6 @@ def test_capture_photo_cycles_through_images():
 
         photo1 = capture_photo(tmpdir)
         assert os.path.basename(photo1.path) == "a_bird.jpg"
-        assert base64.b64decode(photo1.data_b64) == b"fake image data"
         assert photo1.media_type == "image/jpeg"
 
         photo2 = capture_photo(tmpdir)

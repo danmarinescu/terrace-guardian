@@ -4,7 +4,6 @@ from dataclasses import dataclass
 @dataclass
 class CapturedPhoto:
     path: str
-    data_b64: str  # base64-encoded image bytes (JSON-safe for Temporal payloads)
     media_type: str
 
 

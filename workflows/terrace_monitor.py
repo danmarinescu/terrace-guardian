@@ -27,12 +27,14 @@ class TerraceMonitorWorkflow(PydanticAIWorkflow):
         self._last_checked_at: str | None = None
         self._photos_dir = "photos"
         self._continue_as_new_threshold = 100
+        self._num_cycles = 0
 
     @workflow.run
     async def run(self, config: MonitorConfig) -> None:
         self._interval_seconds = config.interval_seconds
         self._photos_dir = config.photos_dir
         self._continue_as_new_threshold = config.continue_as_new_threshold
+        self._num_cycles = config.num_cycles
 
         while True:
             if not self._is_paused:
@@ -48,12 +50,17 @@ class TerraceMonitorWorkflow(PydanticAIWorkflow):
 
             self._cycle_count += 1
 
+            if self._num_cycles > 0 and self._cycle_count >= self._num_cycles:
+                workflow.logger.info(f"Completed {self._cycle_count} cycles, finishing")
+                return
+
             if self._cycle_count >= self._continue_as_new_threshold:
                 workflow.logger.info("Continuing as new to reset history")
                 config_carry = MonitorConfig(
                     photos_dir=self._photos_dir,
                     interval_seconds=self._interval_seconds,
                     continue_as_new_threshold=self._continue_as_new_threshold,
+                    num_cycles=self._num_cycles,
                 )
                 workflow.continue_as_new(config_carry)
 

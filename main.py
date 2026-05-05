@@ -35,9 +35,9 @@ async def run_worker():
     await worker.run()
 
 
-async def start_workflow(photos_dir: str, interval: int):
+async def start_workflow(photos_dir: str, interval: int, num_cycles: int):
     client = await Client.connect("localhost:7233", plugins=[PydanticAIPlugin()])
-    config = MonitorConfig(photos_dir=photos_dir, interval_seconds=interval)
+    config = MonitorConfig(photos_dir=photos_dir, interval_seconds=interval, num_cycles=num_cycles)
     handle = await client.start_workflow(
         TerraceMonitorWorkflow.run,
         config,
@@ -47,6 +47,7 @@ async def start_workflow(photos_dir: str, interval: int):
     print(f"Workflow started: {handle.id}")
     print(f"  Photos dir: {photos_dir}")
     print(f"  Interval: {interval}s")
+    print(f"  Cycles: {'infinite' if num_cycles == 0 else num_cycles}")
 
 
 async def send_signal(signal_name: str, arg=None):
@@ -86,6 +87,7 @@ def main():
     start_parser = subparsers.add_parser("start", help="Start the monitoring workflow")
     start_parser.add_argument("--photos-dir", default="photos", help="Directory with terrace photos")
     start_parser.add_argument("--interval", type=int, default=30, help="Seconds between checks")
+    start_parser.add_argument("--num-cycles", type=int, default=0, help="Stop after N cycles (0 = infinite)")
 
     subparsers.add_parser("pause", help="Pause monitoring")
     subparsers.add_parser("resume", help="Resume monitoring")
@@ -99,7 +101,7 @@ def main():
     if args.command == "worker":
         asyncio.run(run_worker())
     elif args.command == "start":
-        asyncio.run(start_workflow(args.photos_dir, args.interval))
+        asyncio.run(start_workflow(args.photos_dir, args.interval, args.num_cycles))
     elif args.command == "pause":
         asyncio.run(send_signal("pause"))
     elif args.command == "resume":

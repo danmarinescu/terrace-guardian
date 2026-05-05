@@ -13,6 +13,7 @@ class MonitorConfig:
     photos_dir: str = "photos"
     interval_seconds: int = 30
     continue_as_new_threshold: int = 100
+    num_cycles: int = 0  # 0 = infinite, >0 = stop after N cycles
 
 
 @dataclass

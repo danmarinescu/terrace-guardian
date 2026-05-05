@@ -70,7 +70,7 @@ git commit -m "feat: project setup with dependencies and directory structure"
 Create `tests/__init__.py` and `tests/test_models.py`:
 
 ```python
-from models.types import MonitorConfig, TerraceStatus
+from models.types import CapturedPhoto, MonitorConfig, TerraceStatus
 
 
 def test_monitor_config_defaults():
@@ -78,6 +78,17 @@ def test_monitor_config_defaults():
     assert config.photos_dir == "photos"
     assert config.interval_seconds == 30
     assert config.continue_as_new_threshold == 100
+
+
+def test_captured_photo():
+    photo = CapturedPhoto(
+        path="/photos/bird.jpg",
+        data=b"fake image bytes",
+        media_type="image/jpeg",
+    )
+    assert photo.path == "/photos/bird.jpg"
+    assert photo.data == b"fake image bytes"
+    assert photo.media_type == "image/jpeg"
 
 
 def test_terrace_status_initial():
@@ -120,6 +131,13 @@ from dataclasses import dataclass
 
 
 @dataclass
+class CapturedPhoto:
+    path: str
+    data: bytes
+    media_type: str
+
+
+@dataclass
 class MonitorConfig:
     photos_dir: str = "photos"
     interval_seconds: int = 30
@@ -139,7 +157,7 @@ class TerraceStatus:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd /Users/dan/work/temporal_hackaton/test_project && uv run pytest tests/test_models.py -v`
-Expected: 3 tests PASS
+Expected: 4 tests PASS
 
 - [ ] **Step 5: Commit**
 
@@ -174,31 +192,31 @@ def test_capture_photo_cycles_through_images():
         for name in ["a_bird.jpg", "b_plants.jpg", "c_rain.jpg"]:
             Path(tmpdir, name).write_bytes(b"fake image data")
 
-        # First call returns first image
-        path1 = capture_photo(tmpdir)
-        assert os.path.basename(path1) == "a_bird.jpg"
+        photo1 = capture_photo(tmpdir)
+        assert os.path.basename(photo1.path) == "a_bird.jpg"
+        assert photo1.data == b"fake image data"
+        assert photo1.media_type == "image/jpeg"
 
-        # Second call returns second image
-        path2 = capture_photo(tmpdir)
-        assert os.path.basename(path2) == "b_plants.jpg"
+        photo2 = capture_photo(tmpdir)
+        assert os.path.basename(photo2.path) == "b_plants.jpg"
 
-        # Third call returns third image
-        path3 = capture_photo(tmpdir)
-        assert os.path.basename(path3) == "c_rain.jpg"
+        photo3 = capture_photo(tmpdir)
+        assert os.path.basename(photo3.path) == "c_rain.jpg"
 
-        # Fourth call wraps around to first
-        path4 = capture_photo(tmpdir)
-        assert os.path.basename(path4) == "a_bird.jpg"
+        # Wraps around
+        photo4 = capture_photo(tmpdir)
+        assert os.path.basename(photo4.path) == "a_bird.jpg"
 
 
 def test_capture_photo_filters_non_images():
     with tempfile.TemporaryDirectory() as tmpdir:
         Path(tmpdir, "notes.txt").write_text("not an image")
-        Path(tmpdir, "photo.jpg").write_bytes(b"fake image data")
+        Path(tmpdir, "photo.png").write_bytes(b"fake png data")
         Path(tmpdir, ".gitkeep").write_text("")
 
-        path = capture_photo(tmpdir)
-        assert os.path.basename(path) == "photo.jpg"
+        photo = capture_photo(tmpdir)
+        assert os.path.basename(photo.path) == "photo.png"
+        assert photo.media_type == "image/png"
 
 
 def test_capture_photo_empty_dir_raises():
@@ -220,18 +238,28 @@ Expected: FAIL — `ImportError`
 Write `activities/camera.py`:
 
 ```python
-import os
 from pathlib import Path
 
 from temporalio import activity
 
+from models.types import CapturedPhoto
+
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
+
+MEDIA_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".bmp": "image/bmp",
+    ".webp": "image/webp",
+}
 
 _photo_index: dict[str, int] = {}
 
 
 @activity.defn
-async def capture_photo(photos_dir: str) -> str:
+async def capture_photo(photos_dir: str) -> CapturedPhoto:
     path = Path(photos_dir)
     files = sorted(
         f for f in path.iterdir()
@@ -245,7 +273,11 @@ async def capture_photo(photos_dir: str) -> str:
     _photo_index[photos_dir] = (idx + 1) % len(files)
 
     activity.logger.info(f"Captured photo: {photo.name} ({idx % len(files) + 1}/{len(files)})")
-    return str(photo)
+    return CapturedPhoto(
+        path=str(photo),
+        data=photo.read_bytes(),
+        media_type=MEDIA_TYPES.get(photo.suffix.lower(), "image/jpeg"),
+    )
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -551,9 +583,7 @@ git commit -m "feat: add Pydantic AI terrace agent with tool definitions"
 Write `workflows/terrace_monitor.py`:
 
 ```python
-import base64
 from datetime import timedelta
-from pathlib import Path
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -565,7 +595,7 @@ with workflow.unsafe.imports_passed_through():
     from activities.camera import capture_photo
     from activities.logger import log_event
     from agent.terrace_agent import temporal_agent
-    from models.types import MonitorConfig, TerraceStatus
+    from models.types import CapturedPhoto, MonitorConfig, TerraceStatus
 
 
 @workflow.defn
@@ -614,25 +644,14 @@ class TerraceMonitorWorkflow(PydanticAIWorkflow):
             await workflow.sleep(self._interval_seconds)
 
     async def _run_cycle(self) -> None:
-        photo_path = await workflow.execute_activity(
+        photo: CapturedPhoto = await workflow.execute_activity(
             capture_photo,
             args=[self._photos_dir],
             start_to_close_timeout=timedelta(seconds=10),
             retry_policy=RetryPolicy(maximum_attempts=1),
         )
 
-        self._last_photo_path = photo_path
-
-        photo_bytes = Path(photo_path).read_bytes()
-        suffix = Path(photo_path).suffix.lower()
-        media_types = {
-            ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg",
-            ".png": "image/png",
-            ".gif": "image/gif",
-            ".webp": "image/webp",
-        }
-        media_type = media_types.get(suffix, "image/jpeg")
+        self._last_photo_path = photo.path
 
         result = await temporal_agent.run(
             [
@@ -643,7 +662,7 @@ class TerraceMonitorWorkflow(PydanticAIWorkflow):
                     "Use your tools to take action if needed. "
                     "If nothing requires attention, just describe what you see."
                 ),
-                BinaryContent(data=photo_bytes, media_type=media_type),
+                BinaryContent(data=photo.data, media_type=photo.media_type),
             ]
         )
 
@@ -659,7 +678,7 @@ class TerraceMonitorWorkflow(PydanticAIWorkflow):
 
         await workflow.execute_activity(
             log_event,
-            args=[result.output, photo_path, actions_taken],
+            args=[result.output, photo.path, actions_taken],
             start_to_close_timeout=timedelta(seconds=5),
         )
 

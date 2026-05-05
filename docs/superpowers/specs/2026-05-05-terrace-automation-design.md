@@ -49,6 +49,18 @@ This collapses the previous analyze → decide → actuate pipeline into a singl
 
 ## Data Models
 
+### CapturedPhoto
+
+Returned by the `capture_photo` activity. Contains everything the workflow needs so it never reads the filesystem directly.
+
+```python
+@dataclass
+class CapturedPhoto:
+    path: str              # file path for logging/status
+    data: bytes            # raw image bytes (must be < 2MB)
+    media_type: str        # e.g. "image/jpeg"
+```
+
 ### TerraceStatus
 
 Returned by the `get_terrace_status` query.
@@ -100,9 +112,9 @@ Sends a macOS system notification via `osascript`. The agent calls this for cond
 
 These are standard Temporal activities, not agent tools, because they run outside the agent's scope.
 
-### capture_photo(photos_dir: str) -> str
+### capture_photo(photos_dir: str) -> CapturedPhoto
 
-Reads the next image file from the `photos/` directory, cycling alphabetically (round-robin). Returns the file path. Tracks position via a simple counter that wraps around.
+Reads the next image file from the `photos/` directory, cycling alphabetically (round-robin). Returns a `CapturedPhoto` containing the file path, raw image bytes, and media type. Photos must be under 2MB to fit within Temporal's payload limit. Tracks position via a simple counter that wraps around.
 
 - Retry: 1 attempt
 - Timeout: 10s
@@ -130,8 +142,8 @@ Writes a structured JSON log entry to console (stdout) and appends to `logs/even
 
 ```
 1. Check if paused → if yes, sleep(interval), continue
-2. capture_photo(photos_dir) → photo_path
-3. temporal_agent.run(prompt_with_photo) → result
+2. capture_photo(photos_dir) → CapturedPhoto (path, bytes, media_type)
+3. temporal_agent.run(prompt + BinaryContent from captured photo) → result
 4. Update workflow state (last_photo_path, last_analysis = result.output, last_checked_at)
 5. log_event(result.output, photo_path, actions_taken)
 6. Increment cycle_count

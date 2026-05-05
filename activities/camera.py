@@ -1,3 +1,4 @@
+import base64
 from pathlib import Path
 
 from temporalio import activity
@@ -35,5 +36,6 @@ def capture_photo(photos_dir: str) -> CapturedPhoto:
     activity.logger.info(f"Captured photo: {photo.name} ({idx % len(files) + 1}/{len(files)})")
     return CapturedPhoto(
         path=str(photo),
+        data_b64=base64.b64encode(photo.read_bytes()).decode("ascii"),
         media_type=MEDIA_TYPES.get(photo.suffix.lower(), "image/jpeg"),
     )

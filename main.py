@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from temporalio.client import Client
 from temporalio.worker import Worker
+from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner, SandboxRestrictions
 
 from pydantic_ai.durable_exec.temporal import PydanticAIPlugin
 
@@ -26,6 +27,9 @@ async def run_worker():
         workflows=[TerraceMonitorWorkflow],
         activities=[capture_photo, log_event],
         activity_executor=ThreadPoolExecutor(max_workers=4),
+        workflow_runner=SandboxedWorkflowRunner(
+            restrictions=SandboxRestrictions.default.with_passthrough_modules()
+        ),
     )
     print(f"Worker started on task queue '{TASK_QUEUE}'")
     await worker.run()
